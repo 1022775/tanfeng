@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>🦕 恐龙跳跃游戏</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #2a2a2a;
+            font-family: 'Courier New', monospace;
+            user-select: none;
+        }
+        .game-wrapper {
+            background: #f7f7f7;
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+            border-radius: 12px;
+            background: #ffffff;
+            cursor: pointer;
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            image-rendering: pixelated;
+        }
+        .info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 16px;
+            padding: 0 8px;
+            font-size: 16px;
+            color: #535353;
+        }
+        .info .controls {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+        .info .controls kbd {
+            background: #e8e8e8;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            box-shadow: 0 2px 0 #bbb;
+        }
+        .info .score-display {
+            font-weight: bold;
+            font-size: 18px;
+            background: #e8e8e8;
+            padding: 4px 16px;
+            border-radius: 8px;
+        }
+        .info .score-display span {
+            color: #e74c3c;
+        }
+        .info .high-score {
+            font-size: 14px;
+            color: #888;
+        }
+        .info .high-score span {
+            color: #f39c12;
+            font-weight: bold;
+        }
+        @media (max-width: 600px) {
+            .game-wrapper {
+                padding: 10px;
+                border-radius: 12px;
+            }
+            .info {
+                flex-wrap: wrap;
+                gap: 8px;
+                font-size: 14px;
+            }
+            .info .controls kbd {
+                font-size: 12px;
+                padding: 2px 8px;
+            }
+            .info .score-display {
+                font-size: 15px;
+                padding: 2px 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="game-wrapper">
+        <canvas id="gameCanvas" width="800" height="300"></canvas>
+        <div class="info">
+            <div class="controls">
+                <kbd>空格</kbd> 或 <kbd>↑</kbd> 跳跃
+                <span style="margin-left:8px;color:#999;">|</span>
+                <span style="font-size:14px;color:#999;">点击画面也可</span>
+            </div>
+            <div class="score-display">
+                🏆 <span id="scoreDisplay">0</span>
+            </div>
+            <div class="high-score">
+                👑 最高 <span id="highScoreDisplay">0</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        //   🦕 恐龙跳跃游戏 - 完整实现
+        // ============================================================
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreSpan = document.getElementById('scoreDisplay');
+        const highScoreSpan = document.getElementById('highScoreDisplay');
+
+        // ---------- 尺寸常量 ----------
+        const W = 800,
+            H = 300;
+        const GROUND_Y = 250; // 地面高度 (y坐标)
+        const GRAVITY = 0.6;
+        const JUMP_FORCE = -12;
+
+        // ---------- 游戏状态 ----------
+        let gameState = 'playing'; // 'playing' | 'gameover'
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('dinoHighScore')) || 0;
+        let speed = 6;
+        let frame = 0;
+        let obstacleTimer = 0;
+        let obstacleInterval = 100;
+        let obstacles = [];
+        let clouds = [];
+
+        // ---------- 恐龙对象 ----------
+        const dino = {
+            x: 70,
+            y: GROUND_Y,
+            width: 42,
+            height: 48,
+            vy: 0,
+            isJumping: false,
+            legFrame: 0,
+            legTimer: 0,
+        };
+
+        // ---------- 像素矩阵绘制恐龙 ----------
+        // 使用像素矩阵绘制恐龙，更接近原版风格
+        // 24x26 像素矩阵 (1=填充, 0=空白)
+        const DINO_PIXELS = [
+            [0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        ];
+
+        const PIXEL_SIZE = 2.2; // 每个像素的大小
+        const DINO_PIXEL_W = 24;
+        const DINO_PIXEL_H = 26;
+        const DINO_DRAW_W = DINO_PIXEL_W * PIXEL_SIZE;
+        const DINO_DRAW_H = DINO_PIXEL_H * PIXEL_SIZE;
+
+        // 眼睛位置 (在像素矩阵中的坐标)
+        const EYE_PIXEL_X = 18;
+        const EYE_PIXEL_Y = 7;
+
+        // ---------- 绘制像素恐龙 ----------
+        function drawDino(x, y, legOffset) {
+            const px = PIXEL_SIZE;
+            const offsetX = x - DINO_DRAW_W / 2;
+            const offsetY = y - DINO_DRAW_H;
+
+            // 身体颜色
+            const bodyColor = '#535353';
+            const eyeColor = '#ffffff';
+            const pupilColor = '#222222';
+
+            // 绘制身体像素
+            for (let row = 0; row < DINO_PIXEL_H; row++) {
+                for (let col = 0; col < DINO_PIXEL_W; col++) {
+                    if (DINO_PIXELS[row][col] === 1) {
+                        const pxX = offsetX + col * px;
+                        const pxY = offsetY + row * px;
+
+                        // 如果是腿的位置，根据legOffset调整
+                        let isLeg = false;
+                        let legShift = 0;
+
+                        // 后腿区域 (左下)
+                        if (row >= 18 && row < 24 && col >= 1 && col < 5) {
+                            isLeg = true;
+                            legShift = legOffset;
+                        }
+                        // 前腿区域 (右下)
+                        if (row >= 18 && row < 24 && col >= 10 && col < 14) {
+                            isLeg = true;
+                            legShift = -legOffset;
+                        }
+
+                        let drawY = pxY;
+                        if (isLeg) {
+                            drawY += legShift * px * 0.6;
+                        }
+
+                        ctx.fillStyle = bodyColor;
+                        ctx.fillRect(pxX, drawY, px + 0.2, px + 0.2);
+                    }
+                }
+            }
+
+            // 绘制眼睛 (白色)
+            const eyeX = offsetX + EYE_PIXEL_X * px;
+            const eyeY = offsetY + EYE_PIXEL_Y * px;
+            const eyeSize = px * 2.2;
+
+            ctx.fillStyle = eyeColor;
+            ctx.beginPath();
+            ctx.arc(eyeX, eyeY, eyeSize, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 瞳孔 (黑色)
+            ctx.fillStyle = pupilColor;
+            ctx.beginPath();
+            ctx.arc(eyeX + px * 0.5, eyeY + px * 0.3, px * 0.9, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // ---------- 障碍物 ----------
+        class Obstacle {
+            constructor(type) {
+                this.type = type || 'cactus'; // 'cactus' | 'cactus2' | 'cactus3'
+                this.x = W + 20;
+                this.y = GROUND_Y;
+
+                if (this.type === 'cactus') {
+                    this.width = 18;
+                    this.height = 32;
+                    this.y = GROUND_Y - this.height;
+                } else if (this.type === 'cactus2') {
+                    this.width = 24;
+                    this.height = 38;
+                    this.y = GROUND_Y - this.height;
+                } else if (this.type === 'cactus3') {
+                    this.width = 30;
+                    this.height = 28;
+                    this.y = GROUND_Y - this.height;
+                } else if (this.type === 'pterodactyl') {
+                    this.width = 34;
+                    this.height = 22;
+                    this.y = GROUND_Y - 50 - Math.random() * 30;
+                    this.wingAngle = 0;
+                }
+                this.active = true;
+            }
+
+            update() {
+                this.x -= speed;
+                if (this.x + this.width < -20) {
+                    this.active = false;
+                }
+                if (this.type === 'pterodactyl') {
+                    this.wingAngle += 0.12;
+                    this.y += Math.sin(this.wingAngle * 2) * 0.5;
+                }
+            }
+
+            draw() {
+                if (this.type === 'pterodactyl') {
+                    this.drawPterodactyl();
+                    return;
+                }
+
+                // 绘制仙人掌
+                const x = this.x;
+                const y = this.y;
+                const w = this.width;
+                const h = this.height;
+                const color = '#4a7a4a';
+
+                ctx.fillStyle = color;
+                ctx.shadowColor = 'rgba(0,0,0,0.1)';
+                ctx.shadowBlur = 6;
+
+                if (this.type === 'cactus') {
+                    // 小仙人掌
+                    const cw = w * 0.4;
+                    const ch = h * 0.7;
+                    // 主干
+                    ctx.fillRect(x + w * 0.3, y + h * 0.25, cw, ch);
+                    // 左臂
+                    ctx.fillRect(x, y + h * 0.35, cw * 0.7, cw * 0.7);
+                    // 右臂
+                    ctx.fillRect(x + w * 0.6, y + h * 0.3, cw * 0.7, cw * 0.7);
+                    // 顶部
+                    ctx.fillRect(x + w * 0.25, y + h * 0.2, cw * 0.6, cw * 0.3);
+                } else if (this.type === 'cactus2') {
+                    // 大仙人掌
+                    const cw = w * 0.35;
+                    const ch = h * 0.75;
+                    ctx.fillRect(x + w * 0.33, y + h * 0.2, cw, ch);
+                    ctx.fillRect(x + w * 0.08, y + h * 0.3, cw * 0.7, cw * 0.8);
+                    ctx.fillRect(x + w * 0.6, y + h * 0.25, cw * 0.7, cw * 0.8);
+                    ctx.fillRect(x + w * 0.28, y + h * 0.1, cw * 0.5, cw * 0.3);
+                } else if (this.type === 'cactus3') {
+                    // 三连仙人掌
+                    const cw = w * 0.2;
+                    const ch = h * 0.8;
+                    for (let i = 0; i < 3; i++) {
+                        const cx = x + w * 0.15 + i * w * 0.3;
+                        const cy = y + h * 0.15;
+                        ctx.fillRect(cx, cy, cw, ch);
+                        ctx.fillRect(cx - cw * 0.5, cy + ch * 0.3, cw * 0.6, cw * 0.6);
+                        ctx.fillRect(cx + cw * 0.8, cy + ch * 0.25, cw * 0.6, cw * 0.6);
+                    }
+                }
+
+                ctx.shadowBlur = 0;
+            }
+
+            drawPterodactyl() {
+                const x = this.x;
+                const y = this.y;
+                const w = this.width;
+                const h = this.height;
+                const color = '#5a5a5a';
+                const wing = Math.sin(this.wingAngle) * 0.3 + 0.7;
+
+                ctx.fillStyle = color;
+                ctx.shadowColor = 'rgba(0,0,0,0.1)';
+                ctx.shadowBlur = 6;
+
+                // 身体
+                ctx.beginPath();
+                ctx.ellipse(x + w * 0.5, y + h * 0.5, w * 0.3, h * 0.35, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 头部
+                ctx.beginPath();
+                ctx.arc(x + w * 0.8, y + h * 0.3, h * 0.25, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 嘴
+                ctx.fillRect(x + w * 0.85, y + h * 0.25, w * 0.2, h * 0.1);
+
+                // 翅膀 (动画)
+                ctx.fillStyle = '#6a6a6a';
+                // 上翅膀
+                ctx.beginPath();
+                ctx.moveTo(x + w * 0.4, y + h * 0.3);
+                ctx.lineTo(x + w * 0.2, y - h * 0.6 * wing);
+                ctx.lineTo(x + w * 0.6, y + h * 0.1);
+                ctx.fill();
+
+                // 下翅膀
+                ctx.beginPath();
+                ctx.moveTo(x + w * 0.4, y + h * 0.7);
+                ctx.lineTo(x + w * 0.2, y + h * 1.2 * wing);
+                ctx.lineTo(x + w * 0.6, y + h * 0.9);
+                ctx.fill();
+
+                // 眼睛
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(x + w * 0.85, y + h * 0.25, h * 0.08, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#222';
+                ctx.beginPath();
+                ctx.arc(x + w * 0.87, y + h * 0.23, h * 0.04, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.shadowBlur = 0;
+            }
+
+            // 碰撞箱 (矩形)
+            getBounds() {
+                let pad = 4;
+                if (this.type === 'pterodactyl') {
+                    pad = 6;
+                }
+                return {
+                    x: this.x + pad,
+                    y: this.y + pad,
+                    width: this.width - pad * 2,
+                    height: this.height - pad * 2
+                };
+            }
+        }
+
+        // ---------- 云朵 ----------
+        function initClouds() {
+            clouds = [];
+            for (let i = 0; i < 6; i++) {
+                clouds.push({
+                    x: Math.random() * W,
+                    y: 10 + Math.random() * 80,
+                    w: 40 + Math.random() * 60,
+                    speed: 0.2 + Math.random() * 0.3,
+                    opacity: 0.4 + Math.random() * 0.3,
+                });
+            }
+        }
+        initClouds();
+
+        function updateClouds() {
+            for (let c of clouds) {
+                c.x -= c.speed;
+                if (c.x + c.w < -20) {
+                    c.x = W + 20 + Math.random() * 100;
+                    c.y = 10 + Math.random() * 80;
+                    c.w = 40 + Math.random() * 60;
+                }
+            }
+        }
+
+        function drawClouds() {
+            for (let c of clouds) {
+                ctx.globalAlpha = c.opacity;
+                ctx.fillStyle = '#d0d0d0';
+                const cx = c.x,
+                    cy = c.y,
+                    w = c.w;
+                // 绘制云朵 (多个圆形)
+                ctx.beginPath();
+                ctx.arc(cx, cy + w * 0.2, w * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(cx + w * 0.3, cy, w * 0.35, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(cx + w * 0.7, cy + w * 0.1, w * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(cx + w * 0.4, cy + w * 0.3, w * 0.25, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // ---------- 生成障碍物 ----------
+        function spawnObstacle() {
+            const types = ['cactus', 'cactus2', 'cactus3'];
+            // 随着分数增加，出现翼龙
+            if (score > 200 && Math.random() < 0.15) {
+                types.push('pterodactyl');
+            }
+            if (score > 500 && Math.random() < 0.1) {
+                types.push('pterodactyl');
+            }
+            const type = types[Math.floor(Math.random() * types.length)];
+            obstacles.push(new Obstacle(type));
+        }
+
+        // ---------- 碰撞检测 ----------
+        function checkCollision(dinoBounds, obstacleBounds) {
+            return dinoBounds.x < obstacleBounds.x + obstacleBounds.width &&
+                dinoBounds.x + dinoBounds.width > obstacleBounds.x &&
+                dinoBounds.y < obstacleBounds.y + obstacleBounds.height &&
+                dinoBounds.y + dinoBounds.height > obstacleBounds.y;
+        }
+
+        // ---------- 重置游戏 ----------
+        function resetGame() {
+            dino.y = GROUND_Y;
+            dino.vy = 0;
+            dino.isJumping = false;
+            dino.legFrame = 0;
+            obstacles = [];
+            score = 0;
+            speed = 6;
+            obstacleTimer = 0;
+            obstacleInterval = 100;
+            gameState = 'playing';
+            updateScoreDisplay();
+        }
+
+        // ---------- 更新分数显示 ----------
+        function updateScoreDisplay() {
+            scoreSpan.textContent = Math.floor(score);
+            highScoreSpan.textContent = highScore;
+        }
+
+        // ---------- 游戏结束 ----------
+        function gameOver() {
+            gameState = 'gameover';
+            if (score > highScore) {
+                highScore = Math.floor(score);
+                localStorage.setItem('dinoHighScore', String(highScore));
+                highScoreSpan.textContent = highScore;
+            }
+        }
+
+        // ---------- 跳跃 ----------
+        function jump() {
+            if (gameState === 'gameover') {
+                resetGame();
+                return;
+            }
+            if (!dino.isJumping) {
+                dino.vy = JUMP_FORCE;
+                dino.isJumping = true;
+            }
+        }
+
+        // ---------- 更新游戏 ----------
+        function update() {
+            if (gameState === 'gameover') return;
+
+            frame++;
+
+            // ---- 恐龙物理 ----
+            dino.vy += GRAVITY;
+            dino.y += dino.vy;
+
+            if (dino.y >= GROUND_Y) {
+                dino.y = GROUND_Y;
+                dino.vy = 0;
+                dino.isJumping = false;
+            }
+
+            // 腿部动画
+            if (!dino.isJumping) {
+                dino.legTimer++;
+                if (dino.legTimer > 6) {
+                    dino.legTimer = 0;
+                    dino.legFrame = (dino.legFrame + 1) % 2;
+                }
+            } else {
+                dino.legFrame = 0;
+            }
+
+            // ---- 障碍物生成 ----
+            obstacleTimer++;
+            const minInterval = Math.max(30, obstacleInterval - speed * 1.5);
+            if (obstacleTimer > minInterval) {
+                obstacleTimer = 0;
+                if (Math.random() < 0.6 + speed * 0.02) {
+                    spawnObstacle();
+                }
+            }
+
+            // ---- 更新障碍物 ----
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].update();
+                if (!obstacles[i].active) {
+                    obstacles.splice(i, 1);
+                }
+            }
+
+            // ---- 碰撞检测 ----
+            const dinoBounds = {
+                x: dino.x - dino.width * 0.35,
+                y: dino.y - dino.height + 6,
+                width: dino.width * 0.7,
+                height: dino.height - 10,
+            };
+
+            for (let obs of obstacles) {
+                const obsBounds = obs.getBounds();
+                if (checkCollision(dinoBounds, obsBounds)) {
+                    gameOver();
+                    return;
+                }
+            }
+
+            // ---- 计分 ----
+            score += speed * 0.08;
+            updateScoreDisplay();
+
+            // ---- 速度递增 ----
+            if (frame % 120 === 0 && speed < 16) {
+                speed += 0.15;
+            }
+
+            // ---- 云朵 ----
+            updateClouds();
+        }
+
+        // ---------- 绘制游戏 ----------
+        function draw() {
+            ctx.clearRect(0, 0, W, H);
+
+            // ---- 背景 ----
+            const gradient = ctx.createLinearGradient(0, 0, 0, H);
+            gradient.addColorStop(0, '#f0f4f8');
+            gradient.addColorStop(0.7, '#ffffff');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, W, H);
+
+            // ---- 云朵 ----
+            drawClouds();
+
+            // ---- 地面 ----
+            ctx.fillStyle = '#e8e8e8';
+            ctx.fillRect(0, GROUND_Y + 2, W, H - GROUND_Y);
+
+            // 地面线
+            ctx.strokeStyle = '#c0c0c0';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, GROUND_Y);
+            ctx.lineTo(W, GROUND_Y);
+            ctx.stroke();
+
+            // 地面纹理 (小点)
+            ctx.fillStyle = '#d5d5d5';
+            for (let i = 0; i < 50; i++) {
+                const x = (i * 17 + frame * 0.5) % W;
+                const y = GROUND_Y + 6 + (i * 7) % 20;
+                ctx.fillRect(x, y, 2, 2);
+            }
+
+            // ---- 障碍物 ----
+            for (let obs of obstacles) {
+                obs.draw();
+            }
+
+            // ---- 恐龙 ----
+            const legOffset = dino.isJumping ? 0 : (dino.legFrame === 0 ? 1 : -1);
+            drawDino(dino.x, dino.y, legOffset);
+
+            // ---- 游戏结束遮罩 ----
+            if (gameState === 'gameover') {
+                ctx.fillStyle = 'rgba(0,0,0,0.25)';
+                ctx.fillRect(0, 0, W, H);
+
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                // 游戏结束文字
+                ctx.font = 'bold 42px "Courier New", monospace';
+                ctx.fillStyle = '#e74c3c';
+                ctx.shadowColor = 'rgba(0,0,0,0.2)';
+                ctx.shadowBlur = 12;
+                ctx.fillText('💀 GAME OVER', W / 2, H / 2 - 30);
+                ctx.shadowBlur = 0;
+
+                ctx.font = '20px "Courier New", monospace';
+                ctx.fillStyle = '#555555';
+                ctx.fillText('按 空格 / ↑ / 点击 重新开始', W / 2, H / 2 + 40);
+
+                // 显示最终得分
+                ctx.font = '18px "Courier New", monospace';
+                ctx.fillStyle = '#333333';
+                ctx.fillText('得分: ' + Math.floor(score), W / 2, H / 2 + 85);
+            }
+
+            // ---- 速度指示器 (调试用，但也可以保留作为装饰) ----
+            ctx.fillStyle = 'rgba(0,0,0,0.06)';
+            ctx.fillRect(W - 120, 12, 100, 8);
+            ctx.fillStyle = '#4a90d9';
+            const speedPercent = Math.min(1, (speed - 6) / 10);
+            ctx.fillRect(W - 118, 14, 96 * speedPercent, 4);
+            ctx.fillStyle = '#999';
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText('⚡', W - 126, 20);
+        }
+
+        // ---------- 游戏循环 ----------
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ---------- 事件绑定 ----------
+        // 键盘
+        document.addEventListener('keydown', (e) => {
+            if (e.key === ' ' || e.key === 'Space' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                jump();
+            }
+        });
+
+        // 鼠标点击
+        canvas.addEventListener('click', (e) => {
+            e.preventDefault();
+            jump();
+        });
+
+        // 触摸 (移动端)
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            jump();
+        }, { passive: false });
+
+        // 防止页面滚动
+        document.addEventListener('keydown', (e) => {
+            if (e.key === ' ' || e.key === 'Space' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // ---------- 启动游戏 ----------
+        // 显示最高分
+        highScoreSpan.textContent = highScore;
+        updateScoreDisplay();
+
+        // 启动循环
+        gameLoop();
+
+        console.log('🦕 恐龙跳跃游戏已启动！');
+        console.log('按 空格 / ↑ 跳跃，点击画面也可跳跃');
+        console.log('当前最高分:', highScore);
+
+        // ---------- 响应窗口变化 (保持canvas比例) ----------
+        function resizeCanvas() {
+            const wrapper = canvas.parentElement;
+            const maxWidth = wrapper.clientWidth - 0;
+            if (maxWidth < 800) {
+                canvas.style.width = maxWidth + 'px';
+                canvas.style.height = (maxWidth * 300 / 800) + 'px';
+            } else {
+                canvas.style.width = '';
+                canvas.style.height = '';
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        console.log('✅ 游戏加载完成！');
+    </script>
+
+</body>
+</html>
